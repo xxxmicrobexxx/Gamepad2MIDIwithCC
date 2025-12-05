@@ -1,227 +1,136 @@
+#!/usr/bin/env python3
 import pygame
 import mido
-import tkinter as tk
-from tkinter import ttk, messagebox
+import sys
 
-class GamepadMidiApp:
-    def __init__(self, main_window):
-        self.root = main_window
-        self.root.title("Gamepad to MIDI")
+# ================== CONFIGURATION ==================
+DEADZONE = 0.15                     # Smaller deadzone feels more responsive for momentary
+MIDI_CHANNEL = 0
+DESIRED_PORT_NAME = "Xbox In"  # CHECK YOUR PORT NAME - I use loopMIDI for MIDI mapping
 
-        # Calculate window size based on screen dimensions
-        screen_width = self.root.winfo_screenwidth()
-        screen_height = self.root.winfo_screenheight()
-        window_width = int(screen_width * 0.2)
-        window_height = int(screen_height * 0.6)
-        self.root.geometry(f"{window_width}x{window_height}")
+# 8 independent joystick directions — now momentary (0 when released)
+CC_JOY = {
+    'left_right':  1,
+    'left_left':   2,
+    'left_down':   3,
+    'left_up':     4,
+    'right_right':10,
+    'right_left': 11,
+    'right_down': 12,
+    'right_up':   13,
+}
 
-        # Center the window on the screen
-        x_position = (screen_width - window_width) // 2
-        y_position = (screen_height - window_height) // 2
-        self.root.geometry(f"+{x_position}+{y_position}")
+CC_BUTTONS = [20,21,22,23,24,25,26,27,28,29] + [None]*10
+CC_LEFT_TRIGGER  = 5   # now momentary
+CC_RIGHT_TRIGGER = 6   # now momentary
 
-        self.joystick = None
-        self.outport = None
+CC_DPAD = { (0,1):70, (0,-1):71, (-1,0):72, (1,0):73,
+            (1,1):74, (1,-1):75, (-1,1):76, (-1,-1):77 }
 
-        style = ttk.Style()
-        style.configure("TLabel", font=("Helvetica", 12))
-        style.configure("TButton", font=("Helvetica", 12))
-        style.configure("TListbox", font=("Helvetica", 12))
-
-        self.label_gamepad = ttk.Label(self.root, text="Select a gamepad:")
-        self.label_gamepad.pack(pady=10)
-        self.gamepad_listbox = tk.Listbox(self.root, exportselection=False, width=40, height=10)
-        self.gamepad_listbox.pack()
-
-        self.label_midi = ttk.Label(self.root, text="Select a MIDI output port:")
-        self.label_midi.pack(pady=10)
-        self.midi_listbox = tk.Listbox(self.root, exportselection=False, width=40, height=10)
-        self.midi_listbox.pack()
-
-        self.refresh_button = ttk.Button(self.root, text="Refresh", command=self.populate_lists)
-        self.refresh_button.pack(pady=10)
-
-        self.check_mapping_button = ttk.Button(self.root, text="Check Gamepad Mapping", command=self.check_gamepad_mapping)
-        self.check_mapping_button.pack(pady=10)
-
-        self.start_button = ttk.Button(self.root,
-                                       text="Start MIDI Connection",
-                                       command=self.start_midi)
-        self.start_button.pack(pady=10)
-
-        self.stop_button = ttk.Button(self.root,
-                                      text="Stop MIDI Connection",
-                                      command=self.stop_midi,
-                                      state=tk.DISABLED)
-        self.stop_button.pack(pady=10)
-
-        self.status_label = ttk.Label(self.root, text="")
-        self.status_label.pack(pady=10)
-
-        self.running = False
-        self.populate_lists()
-
-        self.midi_id = None
-
-        self.last_pressed = tk.StringVar(value="Press a gamepad button...")
-
-        # Default note mappings (C Major scale)
-        self.note_values = {
-            'buttons': [60, 62, 64, 65, 67, 69, 71, 72],
-            'axis': {
-                0: 74,  # Left analog stick horizontal
-                1: 75,  # Left analog stick vertical
-                4: 76,  # L2 trigger
-                3: 78,  # Right analog stick horizontal
-                5: 79   # R2 trigger
-            },
-            'hat': {
-                (1, 0): 77,   # D-pad right
-                (-1, 0): 79,  # D-pad left
-                (0, 1): 81,   # D-pad down
-                (0, -1): 83   # D-pad up
-            }
-        }
-
-        self.mapping_window = None
-        self.mapping_label = None
-        self.mapping_text = None
-
-    def populate_lists(self):
-        self.populate_gamepad_list()
-        self.populate_midi_list()
-
-    def populate_gamepad_list(self):
-        pygame.joystick.quit()
-        pygame.joystick.init()
-        self.gamepad_listbox.delete(0, tk.END)
-        for i in range(pygame.joystick.get_count()):
-            joystick = pygame.joystick.Joystick(i)
-            self.gamepad_listbox.insert(tk.END, joystick.get_name())
-
-    def populate_midi_list(self):
-        self.midi_listbox.delete(0, tk.END)
-        for name in mido.get_output_names():
-            self.midi_listbox.insert(tk.END, name)
-
-    def create_mapping_window(self):
-        self.mapping_window = tk.Toplevel(self.root)
-        self.mapping_window.title("Gamepad Mapping")
-
-        self.mapping_label = ttk.Label(self.mapping_window, text="Gamepad Events:")
-        self.mapping_label.pack()
-
-        self.mapping_text = tk.Text(self.mapping_window, wrap=tk.WORD, font=("Helvetica", 12))
-        self.mapping_text.pack()
-
-    def check_gamepad_mapping(self):
-        if not self.running:
-            messagebox.showwarning("Warning", "Please start the MIDI connection before checking gamepad mappings.")
-            return
-
-        if self.mapping_window is None or not self.mapping_window.winfo_exists():
-            self.create_mapping_window()
-
-        pygame.init()  # Initialize the video system
-
-        while True:
-            for event in pygame.event.get():
-                if event.type == pygame.JOYBUTTONDOWN:
-                    self.mapping_text.insert(tk.END, f"Button {event.button} pressed\n")
-                elif event.type == pygame.JOYBUTTONUP:
-                    self.mapping_text.insert(tk.END, f"Button {event.button} released\n")
-                elif event.type == pygame.JOYAXISMOTION:
-                    self.mapping_text.insert(tk.END, f"Axis {event.axis} value: {event.value}\n")
-                elif event.type == pygame.JOYHATMOTION:
-                    self.mapping_text.insert(tk.END, f"D-pad: {event.value}\n")
-
-            # Automatically scroll down
-            self.mapping_text.see(tk.END)
-
-            # Highlight the last printed event
-            self.mapping_text.tag_add("highlight", "end-2l", "end-1l")
-
-            self.mapping_text.update()
-            self.mapping_window.update_idletasks()
-            self.mapping_window.update()
-
-            if self.mapping_window is None or not self.mapping_window.winfo_exists():
-                break
-
-    def start_midi(self):
-        if self.running:
-            return
-
+class GamepadToMomentaryMIDI:
+    def __init__(self):
         pygame.init()
-
+        pygame.joystick.init()
         if pygame.joystick.get_count() == 0:
-            messagebox.showerror("Error", "No gamepads detected.")
-            return
+            print("No gamepad found!")
+            sys.exit(1)
+        self.joy = pygame.joystick.Joystick(0)
+        self.joy.init()
+        print(f"Gamepad: {self.joy.get_name()}")
 
-        gamepad_index = self.gamepad_listbox.curselection()
-        midi_port_index = self.midi_listbox.curselection()
+        ports = mido.get_output_names()
+        if not ports:
+            print("No MIDI ports!")
+            sys.exit(1)
+        port = next((p for p in ports if DESIRED_PORT_NAME.lower() in p.lower()), ports[0])
+        self.outport = mido.open_output(port)
+        print(f"MIDI → {port}\n")
 
-        if len(gamepad_index) == 0 or len(midi_port_index) == 0:
-            messagebox.showerror("Error", "Please select both a gamepad and a MIDI output port.")
-            return
+        # We keep track of what we last sent so we only send when something actually changes
+        self.last_joy = {k: 0 for k in CC_JOY.keys()}
+        self.last_lt = 0
+        self.last_rt = 0
 
-        gamepad_index = gamepad_index[0]
-        midi_port_name = self.midi_listbox.get(midi_port_index[0])
+    def send(self, cc, value):
+        msg = mido.Message('control_change', channel=MIDI_CHANNEL, control=cc, value=value)
+        self.outport.send(msg)
 
-        self.joystick = pygame.joystick.Joystick(gamepad_index)
-        self.joystick.init()
+    def update_stick(self, x_axis, y_axis, prefix):
+        x = self.joy.get_axis(x_axis)
+        y = self.joy.get_axis(y_axis)
 
-        self.outport = mido.open_output(midi_port_name)
+        # Right / Left
+        right_val = int(max(0, x) * 127) if abs(x) >= DEADZONE else 0
+        left_val  = int(max(0, -x) * 127) if abs(x) >= DEADZONE else 0
 
-        self.running = True
-        self.start_button.config(state=tk.DISABLED)
-        self.stop_button.config(state=tk.NORMAL)
+        # Up / Down (note Y axis is inverted on most controllers)
+        down_val  = int(max(0,  y) * 127) if abs(y) >= DEADZONE else 0
+        up_val    = int(max(0, -y) * 127) if abs(y) >= DEADZONE else 0
 
-        self.root.after(10, self.poll_midi_events)
+        # Send only on change
+        if right_val != self.last_joy[f'{prefix}_right']:
+            self.send(CC_JOY[f'{prefix}_right'], right_val)
+            self.last_joy[f'{prefix}_right'] = right_val
+        if left_val != self.last_joy[f'{prefix}_left']:
+            self.send(CC_JOY[f'{prefix}_left'], left_val)
+            self.last_joy[f'{prefix}_left'] = left_val
+        if down_val != self.last_joy[f'{prefix}_down']:
+            self.send(CC_JOY[f'{prefix}_down'], down_val)
+            self.last_joy[f'{prefix}_down'] = down_val
+        if up_val != self.last_joy[f'{prefix}_up']:
+            self.send(CC_JOY[f'{prefix}_up'], up_val)
+            self.last_joy[f'{prefix}_up'] = up_val
 
-    def stop_midi(self):
-        self.running = False
-        pygame.quit()
-        self.start_button.config(state=tk.NORMAL)
-        self.stop_button.config(state=tk.DISABLED)
+    def update_triggers(self):
+        # Xbox triggers: axis 2 = LT, axis 5 = RT  →  -1.0 (rest) … +1.0 (fully pressed)
+        lt = self.joy.get_axis(2)
+        rt = self.joy.get_axis(5)
 
-    def determine_midi_note(self, event):
-        if event.type in [pygame.JOYBUTTONDOWN, pygame.JOYBUTTONUP]:
-            return self.note_values['buttons'][event.button % 8]
-        elif event.type == pygame.JOYAXISMOTION:
-            return self.note_values['axis'].get(event.axis)
-        elif event.type == pygame.JOYHATMOTION:
-            return self.note_values['hat'].get(event.value)
-        return None
+        # Momentary: only send >0 when actually pressed, otherwise 0
+        lt_val = int((lt + 1) * 63.5) if lt > -0.8 else 0   # small threshold to avoid floating-point noise
+        rt_val = int((rt + 1) * 63.5) if rt > -0.8 else 0
 
-    def poll_midi_events(self):
-        if not self.running:
-            return
+        if lt_val != self.last_lt:
+            self.send(CC_LEFT_TRIGGER, lt_val)
+            self.last_lt = lt_val
+        if rt_val != self.last_rt:
+            self.send(CC_RIGHT_TRIGGER, rt_val)
+            self.last_rt = rt_val
 
-        for event in pygame.event.get():
-            note = self.determine_midi_note(event)
-            if note is None:
-                continue
+    def run(self):
+        clock = pygame.time.Clock()
+        print("Gamepad → Momentary MIDI CC READY! (all sticks + triggers are momentary)\n")
 
-            if event.type == pygame.JOYBUTTONDOWN:
-                self.outport.send(mido.Message('note_on', note=note, velocity=64))
-            elif event.type == pygame.JOYBUTTONUP:
-                self.outport.send(mido.Message('note_off', note=note, velocity=64))
-            elif event.type == pygame.JOYAXISMOTION:
-                if abs(event.value) > 0.6:
-                    self.outport.send(mido.Message('note_on', note=note, velocity=64))
-                else:
-                    self.outport.send(mido.Message('note_off', note=note, velocity=64))
-            elif event.type == pygame.JOYHATMOTION:
-                # Since the value is a tuple, we just check if it's not the neutral position
-                if event.value != (0, 0):
-                    self.outport.send(mido.Message('note_on', note=note, velocity=64))
-                else:
-                    self.outport.send(mido.Message('note_off', note=note, velocity=64))
+        try:
+            while True:
+                for event in pygame.event.get():
+                    # Buttons (already momentary)
+                    if event.type == pygame.JOYBUTTONDOWN and event.button < len(CC_BUTTONS) and CC_BUTTONS[event.button]:
+                        self.send(CC_BUTTONS[event.button], 127)
+                    if event.type == pygame.JOYBUTTONUP and event.button < len(CC_BUTTONS) and CC_BUTTONS[event.button]:
+                        self.send(CC_BUTTONS[event.button], 0)
 
-        self.root.after(10, self.poll_midi_events)
+                    # D-pad / Hat (already momentary)
+                    if event.type == pygame.JOYHATMOTION:
+                        # Turn off previous direction
+                        if hasattr(self, 'last_hat') and self.last_hat in CC_DPAD:
+                            self.send(CC_DPAD[self.last_hat], 0)
+                        # Turn on new direction (if any)
+                        if event.value != (0,0) and event.value in CC_DPAD:
+                            self.send(CC_DPAD[event.value], 127)
+                        self.last_hat = event.value
 
-if __name__ == '__main__':
-    app_root = tk.Tk()
-    app = GamepadMidiApp(app_root)
-    app_root.mainloop()
+                # Continuously poll sticks and triggers (this is where momentary behavior happens)
+                self.update_stick(0, 1, 'left')   # Left stick
+                self.update_stick(3, 4, 'right')  # Right stick
+                self.update_triggers()
+
+                clock.tick(200)  # 200 Hz is more than enough, reduces MIDI spam
+
+        except KeyboardInterrupt:
+            print("\nBye!")
+        finally:
+            pygame.quit()
+
+if __name__ == "__main__":
+    GamepadToMomentaryMIDI().run()
