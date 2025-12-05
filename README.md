@@ -2,6 +2,8 @@
 
 This project allows you to use your gamepad (Xbox controllers by default) to generate MIDI signals, turning your gamepad into a musical controller. You can easily customize the mapping of gamepad buttons and axes to MIDI notes.
 
+I couldn't get the original to work with my xbox controller into VJ software.   I used grok because i don'nt know pythong and this code did the trick.
+
 ## Table of Contents
 - [Requirements](#requirements)
 - [Installation](#installation)
